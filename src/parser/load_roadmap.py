@@ -1,7 +1,8 @@
-import pandas as pd
 from pathlib import Path
+import pandas as pd
 import streamlit as st
 
+# Mappatura mesi in italiano → numero mese
 ITALIAN_MONTHS = {
     "GENNAIO": 1,
     "FEBBRAIO": 2,
@@ -17,8 +18,14 @@ ITALIAN_MONTHS = {
     "DICEMBRE": 12,
 }
 
+
 def load_roadmap_data(file_path: Path) -> pd.DataFrame:
-    """Legge roadmap.xlsx e restituisce il dataset unificato per la dashboard."""
+    """
+    Legge roadmap.xlsx e restituisce il dataset unificato per la dashboard.
+    Ogni riga del DataFrame finale rappresenta:
+    (anno, mese, impianto, tipo_impianto) con HC/FTE effettivi e previsti,
+    ingressi e cessazioni.
+    """
 
     xls = pd.ExcelFile(file_path, engine="openpyxl")
     sheet_names = xls.sheet_names
@@ -28,28 +35,35 @@ def load_roadmap_data(file_path: Path) -> pd.DataFrame:
     for sheet in sheet_names:
         sheet_up = sheet.upper()
 
-        # saltiamo fogli “tecnici” che non contengono dati di organico mensile
+        # Salta fogli "tecnici" che non contengono dati mensili
         if sheet_up in ["ASSEGNAZIONI", "ASSEGNZIONI", "TOT", "SUMMARY"]:
             continue
 
-        df_raw = pd.read_excel(file_path, sheet_name=sheet, engine="openpyxl", header=None)
+        # Legge il foglio SENZA header, così possiamo trovare la riga giusta
+        df_raw = pd.read_excel(
+            file_path, sheet_name=sheet, engine="openpyxl", header=None
+        )
 
+        # Classificazione tipo impianto
         if "ACC" in sheet_up:
-            # fogli tipo ACC ROMA / ACC MILANO / ACC PADOVA
+            tipo = "ACC"
             df_norm = parse_acc_layout(df_raw, sheet_up)
         else:
-            # fogli tipo FIUMICINO, PALERMO, CIAMPINO, ecc. + eventuali “Aeroporti Strategici / Regional Airports”
+            # FIUMICINO, PALERMO, CIAMPINO, OLBIA, ALGHERO, ecc.
+            # e anche eventuali "Aeroporti Strategici" / "Regional Airports"
+            tipo = "AEROPORTO"
             df_norm = parse_airport_layout(df_raw, sheet_up)
 
         if df_norm is not None and not df_norm.empty:
             frames.append(df_norm)
 
+    # Se nessun foglio è stato riconosciuto, non mandiamo in crash la app
     if not frames:
         st.error(
             "⚠️ Nessun foglio valido trovato in roadmap.xlsx. "
-            "Dobbiamo ancora affinare il parser per la struttura dei fogli."
+            "Dobbiamo ancora affinare il parser per la struttura reale dei fogli."
         )
-        # DataFrame vuoto con colonne attese
+        # Ritorno DataFrame vuoto ma con le colonne che la dashboard si aspetta
         return pd.DataFrame(
             columns=[
                 "anno",
@@ -65,9 +79,10 @@ def load_roadmap_data(file_path: Path) -> pd.DataFrame:
             ]
         )
 
+    # Concatena tutti i fogli normalizzati
     df_all = pd.concat(frames, ignore_index=True)
 
-    # Aggregazione finale per sicurezza
+    # Aggregazione finale di sicurezza
     df_all = (
         df_all.groupby(
             ["anno", "mese", "impianto", "tipo_impianto"], as_index=False
@@ -80,40 +95,46 @@ def load_roadmap_data(file_path: Path) -> pd.DataFrame:
 
 def parse_airport_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
     """
-    Parsing fogli aeroportuali tipo FIUMICINO / PALERMO / CIAMPINO, ecc.
-    Layout:
-    - colonna mesi con stringhe (GENNAIO, FEBBRAIO, ...)
-    - colonna anni con valori 2026/2027/... (spesso in celle unite)
-    - una riga contiene le intestazioni 'FABBISOGNO HC TEORICO', 'PRESENTI', 'DELTA', 'Mobilità', 'Cessazioni', 'Temporanei'
+    Parsing fogli aeroportuali tipo FIUMICINO / PALERMO / CIAMPINO / ecc.
+
+    Layout tipico:
+    - colonna sinistra: anni (2026/2027/...) spesso in celle unite
+    - colonna accanto: mesi (GENNAIO, FEBBRAIO, ...)
+    - riga header con: 'FABBISOGNO HC TEORICO', 'PRESENTI', 'DELTA',
+      'Mobilità', 'Cessazioni', 'Temporanei', ecc.
     """
 
     df = df_raw.copy()
 
-    # Trova la riga header: quella che contiene "FABBISOGNO HC TEORICO"
+    # 1) Trova la riga che contiene "FABBISOGNO HC TEORICO" → header
     header_row_candidates = df.apply(
-        lambda row: row.astype(str).str.upper().str.contains("FABBISOGNO HC TEORICO").any(),
+        lambda row: row.astype(str)
+        .str.upper()
+        .str.contains("FABBISOGNO HC TEORICO")
+        .any(),
         axis=1,
     )
     header_idxs = df.index[header_row_candidates].tolist()
     if not header_idxs:
-        return None  # foglio non nel layout atteso
+        # foglio non nel layout atteso
+        return None
 
     header_idx = header_idxs[0]
     header = df.iloc[header_idx].astype(str).str.strip()
 
-    # Data a partire dalla riga dopo l'header
+    # Dati a partire dalla riga successiva
     data = df.iloc[header_idx + 1 :].reset_index(drop=True)
     data.columns = header
 
-    # Aggiungiamo le colonne 'Anno' e 'Mese' dalle colonne a sinistra (fuori header)
-    # Per farlo, usiamo il df_raw (senza header) limitato alle stesse righe
+    # Ausiliario per trovare anno/mese (usa il df_raw originale)
     aux = df_raw.iloc[header_idx + 1 :].reset_index(drop=True)
 
-    # ---- Anno ----
-    # Cerchiamo una colonna che contenga numeri tipo 2025–2035
+    # 2) Colonna Anno
     year_col = None
     for col in aux.columns:
         col_values = pd.to_numeric(aux[col], errors="coerce")
+        # se in quella colonna c'è almeno un valore fra 2020 e 2040,
+        # assumo che sia la colonna degli anni
         if col_values.between(2020, 2040).sum() >= 1:
             year_col = col
             break
@@ -121,11 +142,9 @@ def parse_airport_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
     if year_col is None:
         return None
 
-    anni = pd.to_numeric(aux[year_col], errors="coerce")
-    anni = anni.ffill()  # 2026 riempie tutte le righe sotto finché non cambia
+    anni = pd.to_numeric(aux[year_col], errors="coerce").ffill()
 
-    # ---- Mese ----
-    # Cerchiamo una colonna con stringhe che corrispondono ai mesi italiani
+    # 3) Colonna Mese (GENNAIO, FEBBRAIO, ...)
     month_col = None
     for col in aux.columns:
         values_str = aux[col].astype(str).str.upper().str.strip()
@@ -139,7 +158,7 @@ def parse_airport_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
     mesi_str = aux[month_col].astype(str).str.upper().str.strip()
     mesi_num = mesi_str.map(ITALIAN_MONTHS)
 
-    # Filtriamo solo le righe con mese riconosciuto
+    # 4) Filtra righe che hanno anno e mese validi
     mask_valid = mesi_num.notna() & anni.notna()
     if not mask_valid.any():
         return None
@@ -148,12 +167,12 @@ def parse_airport_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
     data_valid["anno"] = anni.loc[mask_valid].astype(int)
     data_valid["mese"] = mesi_num.loc[mask_valid].astype(int)
 
-    # ---- Mappatura colonne numeriche ----
+    # 5) Funzione di supporto per estrarre colonne numeriche candidate
     def get_col_or_zero(df_in: pd.DataFrame, candidates):
         for c in candidates:
             if c in df_in.columns:
                 return pd.to_numeric(df_in[c], errors="coerce").fillna(0)
-        return 0
+        return pd.Series(0, index=df_in.index)
 
     hc_prev = get_col_or_zero(
         data_valid,
@@ -163,10 +182,13 @@ def parse_airport_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
         data_valid,
         ["PRESENTI", "PRESENTE", "HC PRESENTI"],
     )
-
     ingressi = get_col_or_zero(
         data_valid,
-        ["Temporanei", "Temporanei Assegnazioni Mobilità", "INGRESSI"],
+        [
+            "Temporanei",
+            "Temporanei Assegnazioni Mobilità",
+            "INGRESSI",
+        ],
     )
     cessazioni = get_col_or_zero(
         data_valid,
@@ -193,14 +215,18 @@ def parse_airport_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
 
 def parse_acc_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
     """
-    Parser semplificato per fogli ACC (ACC ROMA / ACC MILANO / ACC PADOVA).
-    Usa lo stesso trucco: trova riga con 'FABBISOGNO HC TEORICO' e 'PRESENTI'.
+    Parser semplificato per fogli ACC (ACC ROMA, ACC MILANO, ACC PADOVA).
+    Usa lo stesso trucco: trova la riga con 'FABBISOGNO HC TEORICO'
+    e 'PRESENTI', poi deriva anno/mese dalle colonne a sinistra.
     """
 
     df = df_raw.copy()
 
     header_row_candidates = df.apply(
-        lambda row: row.astype(str).str.upper().str.contains("FABBISOGNO HC TEORICO").any(),
+        lambda row: row.astype(str)
+        .str.upper()
+        .str.contains("FABBISOGNO HC TEORICO")
+        .any(),
         axis=1,
     )
     header_idxs = df.index[header_row_candidates].tolist()
@@ -214,7 +240,7 @@ def parse_acc_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
 
     aux = df_raw.iloc[header_idx + 1 :].reset_index(drop=True)
 
-    # Anno (come sopra)
+    # Anno
     year_col = None
     for col in aux.columns:
         col_values = pd.to_numeric(aux[col], errors="coerce")
@@ -225,7 +251,7 @@ def parse_acc_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
         return None
     anni = pd.to_numeric(aux[year_col], errors="coerce").ffill()
 
-    # Mese (se presente o fallback a 1–12)
+    # Mese (se presente come testo, altrimenti default=1)
     month_col = None
     for col in aux.columns:
         values_str = aux[col].astype(str).str.upper().str.strip()
@@ -237,10 +263,12 @@ def parse_acc_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
         mesi_str = aux[month_col].astype(str).str.upper().str.strip()
         mesi_num = mesi_str.map(ITALIAN_MONTHS)
     else:
-        # se non abbiamo mesi, mettiamo mese=1 per tutte le righe valide
         mesi_num = pd.Series(1, index=anni.index)
 
     mask_valid = anni.notna()
+    if not mask_valid.any():
+        return None
+
     data_valid = data.loc[mask_valid].copy()
     data_valid["anno"] = anni.loc[mask_valid].astype(int)
     data_valid["mese"] = mesi_num.loc[mask_valid].fillna(1).astype(int)
@@ -249,7 +277,7 @@ def parse_acc_layout(df_raw: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
         for c in candidates:
             if c in df_in.columns:
                 return pd.to_numeric(df_in[c], errors="coerce").fillna(0)
-        return 0
+        return pd.Series(0, index=df_in.index)
 
     hc_prev = get_col_or_zero(
         data_valid,
