@@ -2,76 +2,123 @@ import pandas as pd
 
 def load_roadmap_data(file_path):
 
-    sheets_acc = ["ACC ROMA", "ACC MILANO", "ACC PADOVA"]
-    sheets_airports = ["Aeroporti Strategici", "Regional Airports"]
+    xls = pd.ExcelFile(file_path, engine="openpyxl")
+    sheet_names = xls.sheet_names
 
     frames = []
 
-    for s in sheets_acc:
-        try:
-            df = pd.read_excel(file_path, sheet_name=s, engine="openpyxl")
-            df_norm = normalize_acc(df, s)
-            frames.append(df_norm)
-        except:
-            pass
+    for sheet in sheet_names:
 
-    for s in sheets_airports:
-        try:
-            df = pd.read_excel(file_path, sheet_name=s, engine="openpyxl")
-            df_norm = normalize_airports(df, s)
+        # Skippa fogli non di interesse
+        if sheet.lower() in ["assegnazioni", "tot", "summary", "dash"]:
+            continue
+
+        # Carica il foglio
+        df = pd.read_excel(file_path, sheet_name=sheet, engine="openpyxl")
+
+        # Determina tipo impianto automaticamente
+        if "ACC" in sheet.upper():
+            tipo = "ACC"
+        elif sheet.upper() in ["AEROPORTI STRATEGICI", "AEROPORTI STRATEGICO", "AEROPORTI STRATEGICI 2025"]:
+            tipo = "STRATEGICO"
+        elif sheet.upper() in ["REGIONAL AIRPORTS", "REGIONALI", "AEROPORTI REGIONALI"]:
+            tipo = "REGIONALE"
+        else:
+            # Per fogli tipo “FIUMICINO”, “PALERMO”, “CATANIA”… → aeroporto normale
+            tipo = "AEROPORTO"
+
+        # Normalizzazione automatica
+        df_norm = normalize_sheet(df, sheet, tipo)
+
+        if df_norm is not None:
             frames.append(df_norm)
-        except:
-            pass
+
+    if not frames:
+        raise ValueError("Nessun foglio valido trovato in roadmap.xlsx")
 
     df_all = pd.concat(frames, ignore_index=True)
 
+    # Aggregazione finale
     df_all = (
         df_all.groupby(["anno","mese","impianto","tipo_impianto"], as_index=False)
-              .sum()
+        .sum()
     )
 
     return df_all
 
-def normalize_acc(df, impianto_name):
 
-    df = df.rename(columns={
-        "PRESENTI": "hc_effettivi",
-        "FABBISOGNO HC TEORICO": "hc_previsti",
-    })
+def normalize_sheet(df, sheet, tipo):
+    """
+    Estrattore generico che si adatta alla struttura:
+    - colonna anno
+    - mese riconosciuto dalle righe (o ripetuto)
+    - colonne FABBISOGNO HC TEORICO, PRESENTI, ingressi, cessazioni
+    """
 
-    df["impianto"] = impianto_name
-    df["tipo_impianto"] = "ACC"
+    df = df.copy()
 
-    df["fte_effettivi"] = df["hc_effettivi"]
-    df["fte_previsti"] = df["hc_previsti"]
+    # Trova colonne disponibili
+    col_map = {
+        "hc_effettivi": ["PRESENTI", "PRESENTE", "HC PRESENTI"],
+        "hc_previsti": ["FABBISOGNO HC TEORICO", "TEORICI", "FABBISOGNO"],
+        "ingressi": ["INGRESSI"],
+        "cessazioni": ["CESSAZIONI", "USCITE"]
+    }
 
-    df["ingressi"] = df.get("ingressi", 0)
-    df["cessazioni"] = df.get("cessazioni", 0)
+    out = {}
 
-    return df[[
-        "anno","mese","impianto","tipo_impianto",
-        "hc_effettivi","hc_previsti",
-        "fte_effettivi","fte_previsti",
-        "ingressi","cessazioni"
-    ]]
+    # -----------------------------------------
+    # TROVA ANNO E MESE (colonne obbligatorie)
+    # -----------------------------------------
+    if "anno" in df.columns:
+        out["anno"] = df["anno"]
+    else:
+        # spesso è la prima colonna con valori 2025/2026/2027
+        first_col = df.iloc[:,0]
+        if first_col.dtype in ["int64", "float64"]:
+            out["anno"] = first_col
+        else:
+            return None  # foglio non strutturato
 
-def normalize_airports(df, sheet_name):
+    if "mese" in df.columns:
+        out["mese"] = df["mese"]
+    else:
+        # Se non esiste colonna mese, assumo mese=1 (valore placeholder)
+        out["mese"] = 1
 
-    df = df.rename(columns={
-        "PRESENTI": "hc_effettivi",
-        "TEORICI": "hc_previsti",
-        "IMPIANTO": "impianto"
-    })
+    # -----------------------------------------
+    # TROVA LE COLONNE NUMERICHE
+    # -----------------------------------------
+    for target, candidates in col_map.items():
+        found = None
+        for c in candidates:
+            if c in df.columns:
+                found = df[c]
+                break
+        if found is None:
+            out[target] = 0
+        else:
+            out[target] = pd.to_numeric(found, errors="coerce").fillna(0)
 
-    df["tipo_impianto"] = "AEROPORTO"
+    # -----------------------------------------
+    # IMPIANTO E TIPO
+    # -----------------------------------------
 
-    df["fte_effettivi"] = df["hc_effettivi"]
-    df["fte_previsti"] = df["hc_previsti"]
+    out_df = pd.DataFrame(out)
+    out_df["impianto"] = sheet.upper()
+    out_df["tipo_impianto"] = tipo
 
-    if "ingressi" not in df: df["ingressi"] = 0
-    if "cessazioni" not in df: df["cessazioni"] = 0
+    # -----------------------------------------
+    # FTE = HC (regola ENAV)
+    # -----------------------------------------
+    out_df["fte_effettivi"] = out_df["hc_effettivi"]
+    out_df["fte_previsti"] = out_df["hc_previsti"]
 
-    return df[[
+    # Se il foglio è vuoto
+    if out_df["anno"].isna().all():
+        return None
+
+    return out_df[[
         "anno","mese","impianto","tipo_impianto",
         "hc_effettivi","hc_previsti",
         "fte_effettivi","fte_previsti",
