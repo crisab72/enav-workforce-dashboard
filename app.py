@@ -1,92 +1,86 @@
 import streamlit as st
-import plotly.express as px
 import pandas as pd
+import plotly.express as px
 
-# ----------------------------------------------------
+# ============================================================
 # PAGE CONFIG
-# ----------------------------------------------------
+# ============================================================
 st.set_page_config(
     page_title="ENAV Workforce Dashboard",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ----------------------------------------------------
-# CORPORATE THEME (ENAV DARK)
-# ----------------------------------------------------
+# ============================================================
+# ENAV DARK CORPORATE THEME (CSS)
+# ============================================================
 st.markdown(
     """
     <style>
-    /* BACKGROUND ----------------------------------------------------- */
     html, body, [class*="css"]  {
         background-color: #020617 !important;  /* very dark navy */
     }
     .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
+        padding-top: 1.8rem;
+        padding-bottom: 1.8rem;
     }
 
-    /* TITLES --------------------------------------------------------- */
     h1, h2, h3, h4 {
-        color: #E5E7EB !important;            /* light gray */
-        font-family: system-ui, -apple-system, BlinkMacSystemFont,
-                     "Segoe UI", sans-serif;
+        color: #E5E7EB !important;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     h2 {
-        font-size: 1.6rem;
+        font-size: 1.4rem;
         font-weight: 700;
+        margin-bottom: 0.2rem;
     }
     h3 {
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         font-weight: 600;
-        margin-bottom: 0.4rem;
+        margin-bottom: 0.2rem;
+    }
+    p, span, label, li {
+        color: #9CA3AF !important;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
-    /* TEXT ----------------------------------------------------------- */
-    p, span, label, .stMarkdown {
-        color: #9CA3AF !important;           /* muted text */
-        font-family: system-ui, -apple-system, BlinkMacSystemFont,
-                     "Segoe UI", sans-serif;
-    }
-
-    /* KPI CARDS (st.metric) ----------------------------------------- */
+    /* KPI cards (st.metric) */
     div.stMetric {
-        background-color: #0B1120;           /* card background */
-        padding: 14px 18px;
-        border-radius: 16px;
+        background-color: #0B1120;
+        padding: 12px 16px;
+        border-radius: 14px;
         border: 1px solid #1F2937;
-        box-shadow: 0 18px 45px rgba(15,23,42,0.8);
+        box-shadow: 0 18px 45px rgba(15,23,42,0.9);
     }
     div.stMetric > label {
         color: #9CA3AF !important;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.06em;
     }
     div.stMetric > div {
         color: #F9FAFB !important;
-        font-size: 1.6rem;
+        font-size: 1.2rem;
         font-weight: 600;
     }
 
-    /* GENERIC CARDS -------------------------------------------------- */
+    /* Generic card container */
     .section-card {
-        background-color: #020617;          /* slightly darker than metric */
-        padding: 22px 26px;
-        border-radius: 18px;
+        background-color: #020617;
+        padding: 18px 20px;
+        border-radius: 16px;
         border: 1px solid #1F2937;
-        box-shadow: 0 20px 60px rgba(15,23,42,0.9);
-        margin-bottom: 20px;
+        box-shadow: 0 20px 60px rgba(15,23,42,0.95);
+        margin-bottom: 14px;
     }
 
-    /* DATAFRAME ------------------------------------------------------ */
     .stDataFrame {
         border-radius: 14px;
         border: 1px solid #1F2937;
         overflow: hidden;
     }
 
-    /* SIDEBAR -------------------------------------------------------- */
+    /* Sidebar */
     section[data-testid="stSidebar"] {
         background-color: #020617 !important;
         border-right: 1px solid #111827;
@@ -95,155 +89,172 @@ st.markdown(
         color: #E5E7EB !important;
     }
 
-    /* REMOVE STREAMLIT DEFAULT TOP PADDING --------------------------- */
     header[data-testid="stHeader"] {
         background: transparent !important;
     }
     </style>
     """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 
-# ----------------------------------------------------
-# SIDEBAR NAVIGATION
-# ----------------------------------------------------
-st.sidebar.title("ENAV – Dashboard Navigation")
-page = st.sidebar.radio(
-    "Choose section:",
-    ["Workforce Overview", "Workforce Mobility", "Facility Dashboard (Fiumicino)"],
+# ============================================================
+# PLACEHOLDER DATA (2026–2031)
+# ============================================================
+
+YEARS = [2026, 2027, 2028, 2029, 2030, 2031]
+FACILITIES = ["Fiumicino", "Palermo", "Catania", "Bari", "Cagliari",
+              "Rome ACC", "Milan ACC", "Padova ACC"]
+
+# Trend ENAV totale (HC)
+overview_trend = pd.DataFrame({
+    "Year": YEARS,
+    "HC Actual":   [2205, 2180, 2150, 2120, 2100, 2080],
+    "HC Required": [2380, 2360, 2340, 2320, 2300, 2280],
+})
+
+# Mobility per anno
+mobility_years = pd.DataFrame({
+    "Year": YEARS,
+    "Hiring": [60, 62, 65, 63, 61, 60],
+    "Exits":  [48, 50, 52, 49, 47, 46],
+    "Upskilling": [20, 21, 23, 22, 21, 20],
+    "Reskilling": [15, 17, 19, 18, 17, 16],
+})
+
+# Dati per facility (HC per anno)
+records = []
+for fac in FACILITIES:
+    base_req = 0
+    base_act = 0
+    if "ACC" in fac:
+        base_req = 320
+        base_act = 300
+    elif fac == "Fiumicino":
+        base_req = 70
+        base_act = 60
+    else:
+        base_req = 60
+        base_act = 52
+
+    for y in YEARS:
+        # variazioni fittizie per dare dinamica
+        delta = (y - 2026) * 1
+        records.append({
+            "Facility": fac,
+            "Year": y,
+            "HC Required": base_req + delta,
+            "HC Actual": base_act + max(-3, 3 - (y - 2026)),  # esempio
+        })
+
+facility_df = pd.DataFrame(records)
+facility_df["FTE Required"] = facility_df["HC Required"]
+facility_df["FTE Actual"] = facility_df["HC Actual"]
+
+# ============================================================
+# SIDEBAR – FILTERS
+# ============================================================
+
+st.sidebar.title("ENAV – Workforce Dashboard")
+
+year_selected = st.sidebar.selectbox(
+    "Select Year", YEARS, index=0
+)
+
+facility_selected = st.sidebar.selectbox(
+    "Select Facility (right column)", FACILITIES, index=0
 )
 
 st.sidebar.markdown(
-    "<small>Mockup layout · ENAV corporate dark theme</small>",
-    unsafe_allow_html=True,
+    "<small>Data are mock values for layout and interaction demo.</small>",
+    unsafe_allow_html=True
 )
 
-# ----------------------------------------------------
-# PLACEHOLDER DATA (for visuals)
-# ----------------------------------------------------
-trend_df = pd.DataFrame(
-    {
-        "Year": [2020, 2021, 2022, 2023, 2024],
-        "HC Actual": [2300, 2280, 2250, 2200, 2180],
-        "HC Required": [2500, 2450, 2400, 2380, 2350],
-    }
-)
+# Filtri applicati ai dataset
+overview_year_row = overview_trend[overview_trend["Year"] == year_selected].iloc[0]
+mobility_year_row = mobility_years[mobility_years["Year"] == year_selected].iloc[0]
 
-mobility_years = pd.DataFrame(
-    {
-        "Year": [2022, 2023, 2024],
-        "Hiring": [45, 58, 65],
-        "Exits": [38, 41, 52],
-    }
-)
+facility_year_df = facility_df[facility_df["Year"] == year_selected]
+facility_selected_row = facility_year_df[facility_year_df["Facility"] == facility_selected].iloc[0]
 
-facility_table = pd.DataFrame(
-    {
-        "Facility": [
-            "Rome ACC",
-            "Milan ACC",
-            "Padova ACC",
-            "Fiumicino",
-            "Palermo",
-            "Catania",
-            "Bari",
-        ],
-        "HC Actual": [320, 295, 280, 60, 54, 52, 48],
-        "HC Required": [350, 310, 300, 70, 60, 58, 55],
-    }
-)
-facility_table["FTE Actual"] = facility_table["HC Actual"]
-facility_table["FTE Required"] = facility_table["HC Required"]
-facility_table["HC Gap"] = facility_table["HC Actual"] - facility_table["HC Required"]
-facility_table["Coverage %"] = (
-    facility_table["HC Actual"] / facility_table["HC Required"]
-).map(lambda x: f"{x:.1%}")
+# ============================================================
+# LAYOUT PRINCIPALE – 3 COLONNE AFFIANCATE
+# ============================================================
 
-# ----------------------------------------------------
-# PAGE 1 – WORKFORCE OVERVIEW
-# ----------------------------------------------------
-if page == "Workforce Overview":
-    st.markdown("## ENAV – Workforce Overview")
-    st.markdown(
-        "Global view of operational workforce across all ENAV facilities "
-        "(ACC, strategic and regional airports)."
-    )
+st.markdown(f"### ENAV – Workforce Dashboard · Year {year_selected}")
 
-    # KPI row
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("HC Actual", "2,205")
-    k2.metric("HC Required", "2,380")
-    k3.metric("HC Gap", "-175")
-    k4.metric("FTE Actual", "2,205")
-    k5.metric("FTE Required", "2,380")
-    k6.metric("FTE Gap", "-175")
+col_overview, col_mobility, col_facility = st.columns(3)
 
-    st.markdown("")
+# ------------------------------------------------------------
+# COLUMN 1 – WORKFORCE OVERVIEW
+# ------------------------------------------------------------
+with col_overview:
+    st.markdown("#### ENAV – Workforce Overview")
 
-    # Charts row
-    col_left, col_right = st.columns([2.2, 1.8])
+    k1, k2, k3 = st.columns(3)
+    k1.metric("HC Actual", f"{overview_year_row['HC Actual']:,.0f}")
+    k2.metric("HC Required", f"{overview_year_row['HC Required']:,.0f}")
+    gap_hc = overview_year_row["HC Actual"] - overview_year_row["HC Required"]
+    k3.metric("HC Gap", f"{gap_hc:,.0f}")
 
-    with col_left:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### HC / FTE Trend – ENAV Total")
-        fig = px.line(
-            trend_df,
-            x="Year",
-            y=["HC Actual", "HC Required"],
-            markers=True,
-            color_discrete_sequence=["#0EA5E9", "#EF4444"],
-        )
-        fig.update_layout(template="plotly_dark", height=320, legend_title_text="")
-        st.plotly_chart(fig, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+    k4, k5, k6 = st.columns(3)
+    k4.metric("FTE Actual", f"{overview_year_row['HC Actual']:,.0f}")
+    k5.metric("FTE Required", f"{overview_year_row['HC Required']:,.0f}")
+    k6.metric("FTE Gap", f"{gap_hc:,.0f}")
 
-    with col_right:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### CTA / EAV Split (Example)")
-        pie_df = pd.DataFrame(
-            {"Category": ["CTA", "EAV"], "FTE": [1800, 405]}
-        )
-        fig_pie = px.pie(
-            pie_df,
-            names="Category",
-            values="FTE",
-            color="Category",
-            color_discrete_map={"CTA": "#0EA5E9", "EAV": "#F97316"},
-        )
-        fig_pie.update_layout(template="plotly_dark", height=320, legend_title_text="")
-        st.plotly_chart(fig_pie, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # Table
+    # Trend ENAV totale
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("### Workforce by Facility (summary view)")
-    st.dataframe(facility_table, use_container_width=True)
+    st.markdown("##### HC / FTE Trend – ENAV Total (2026–2031)")
+    fig_trend = px.line(
+        overview_trend,
+        x="Year",
+        y=["HC Actual", "HC Required"],
+        markers=True,
+        color_discrete_sequence=["#0EA5E9", "#EF4444"],
+    )
+    fig_trend.update_layout(
+        template="plotly_dark",
+        height=260,
+        legend_title_text=""
+    )
+    st.plotly_chart(fig_trend, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ----------------------------------------------------
-# PAGE 2 – WORKFORCE MOBILITY
-# ----------------------------------------------------
-elif page == "Workforce Mobility":
-    st.markdown("## ENAV – Workforce Mobility")
-    st.markdown(
-        "Hiring, exits, upskilling and reskilling for ENAV operational workforce."
-    )
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Hiring", "65")
-    k2.metric("Exits", "52")
-    k3.metric("Upskilling", "23")
-    k4.metric("Reskilling", "19")
-
-    st.markdown("")
-
-    # Hiring & Exits per year
+    # Tabella per facility (solo anno selezionato)
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("### Hiring & Exits per Year")
-    df_melt = mobility_years.melt(
-        id_vars="Year", value_vars=["Hiring", "Exits"], var_name="Type", value_name="Count"
+    st.markdown("##### Workforce by Facility (selected year)")
+    table = facility_year_df.copy()
+    table["HC Gap"] = table["HC Actual"] - table["HC Required"]
+    table["Coverage %"] = (table["HC Actual"] / table["HC Required"]).map(
+        lambda x: f"{x:.1%}"
     )
-    fig = px.bar(
+    st.dataframe(
+        table[["Facility", "HC Actual", "HC Required", "HC Gap", "Coverage %"]],
+        use_container_width=True,
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ------------------------------------------------------------
+# COLUMN 2 – WORKFORCE MOBILITY
+# ------------------------------------------------------------
+with col_mobility:
+    st.markdown("#### ENAV – Workforce Mobility")
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Hiring", f"{mobility_year_row['Hiring']}")
+    m2.metric("Exits", f"{mobility_year_row['Exits']}")
+    m3.metric("Upskilling", f"{mobility_year_row['Upskilling']}")
+    m4.metric("Reskilling", f"{mobility_year_row['Reskilling']}")
+
+    # Hiring & Exits per anno
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown("##### Hiring & Exits per Year (2026–2031)")
+    df_melt = mobility_years.melt(
+        id_vars="Year",
+        value_vars=["Hiring", "Exits"],
+        var_name="Type",
+        value_name="Count",
+    )
+    fig_hire_exit = px.bar(
         df_melt,
         x="Year",
         y="Count",
@@ -251,105 +262,94 @@ elif page == "Workforce Mobility":
         barmode="group",
         color_discrete_map={"Hiring": "#22C55E", "Exits": "#EF4444"},
     )
-    fig.update_layout(template="plotly_dark", height=320, legend_title_text="")
-    st.plotly_chart(fig, use_container_width=True)
+    fig_hire_exit.update_layout(
+        template="plotly_dark",
+        height=260,
+        legend_title_text=""
+    )
+    st.plotly_chart(fig_hire_exit, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Mobility breakdown + trend
-    colA, colB = st.columns(2)
-
-    with colA:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### Mobility Breakdown (Example)")
-        fig2 = px.pie(
-            names=["Hiring", "Exits", "Upskilling", "Reskilling"],
-            values=[65, 52, 23, 19],
-            color_discrete_sequence=["#22C55E", "#EF4444", "#38BDF8", "#F97316"],
-        )
-        fig2.update_layout(template="plotly_dark", height=320, legend_title_text="")
-        st.plotly_chart(fig2, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with colB:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### Mobility Trend (Example index)")
-        trend_mob = pd.DataFrame(
-            {
-                "Year": [2020, 2021, 2022, 2023, 2024],
-                "Mobility Index": [100, 110, 120, 115, 118],
-            }
-        )
-        fig3 = px.line(
-            trend_mob,
-            x="Year",
-            y="Mobility Index",
-            markers=True,
-            color_discrete_sequence=["#0EA5E9"],
-        )
-        fig3.update_layout(template="plotly_dark", height=320, showlegend=False)
-        st.plotly_chart(fig3, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-# ----------------------------------------------------
-# PAGE 3 – FACILITY DASHBOARD (FIUMICINO)
-# ----------------------------------------------------
-else:
-    st.markdown("## ENAV – FIUMICINO (Facility Dashboard)")
-    st.markdown(
-        "Local workforce metrics, mobility and qualification breakdown for the Fiumicino facility."
-    )
-
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("HC Actual", "60")
-    k2.metric("HC Required", "70")
-    k3.metric("HC Gap", "-10")
-    k4.metric("Hiring YTD", "7")
-    k5.metric("Exits YTD", "4")
-
-    st.markdown("")
-
-    # Monthly HC trend
+    # Mobility breakdown (donut)
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    st.markdown("### Monthly HC Trend")
-    monthly_df = pd.DataFrame(
-        {"Month": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"], "HC": [60, 58, 59, 60, 61, 60]}
+    st.markdown("##### Mobility Breakdown (selected year)")
+    donut_df = pd.DataFrame({
+        "Type": ["Hiring", "Exits", "Upskilling", "Reskilling"],
+        "Value": [
+            mobility_year_row["Hiring"],
+            mobility_year_row["Exits"],
+            mobility_year_row["Upskilling"],
+            mobility_year_row["Reskilling"],
+        ],
+    })
+    fig_donut = px.pie(
+        donut_df,
+        names="Type",
+        values="Value",
+        hole=0.55,
+        color="Type",
+        color_discrete_map={
+            "Hiring": "#22C55E",
+            "Exits": "#EF4444",
+            "Upskilling": "#38BDF8",
+            "Reskilling": "#F97316",
+        },
     )
-    fig = px.line(
-        monthly_df,
-        x="Month",
-        y="HC",
-        markers=True,
+    fig_donut.update_layout(
+        template="plotly_dark",
+        height=260,
+        legend_title_text=""
+    )
+    st.plotly_chart(fig_donut, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ------------------------------------------------------------
+# COLUMN 3 – FACILITY DASHBOARD (single facility)
+# ------------------------------------------------------------
+with col_facility:
+    st.markdown(f"#### ENAV – {facility_selected} (Facility Dashboard)")
+
+    # KPI impianto
+    f1, f2, f3 = st.columns(3)
+    f1.metric("HC Actual", f"{facility_selected_row['HC Actual']}")
+    f2.metric("HC Required", f"{facility_selected_row['HC Required']}")
+    gap_fac = facility_selected_row["HC Actual"] - facility_selected_row["HC Required"]
+    f3.metric("HC Gap", f"{gap_fac}")
+
+    # Mobility locale (mock)
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown("##### Local Mobility (example)")
+    fig_local_pie = px.pie(
+        names=["Transfers", "Temporary Assignments", "Exits"],
+        values=[35, 12, 4],
+        hole=0.55,
+        color_discrete_sequence=["#0EA5E9", "#38BDF8", "#EF4444"],
+    )
+    fig_local_pie.update_layout(
+        template="plotly_dark",
+        height=220,
+        legend_title_text=""
+    )
+    st.plotly_chart(fig_local_pie, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Distribuzione per Qualification (CTA/EAV/SUP/TRN)
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown("##### Workforce by Qualification (example)")
+    qual_df = pd.DataFrame({
+        "Qualification": ["CTA", "EAV", "SUP", "TRN"],
+        "Headcount": [30, 18, 7, 5],
+    })
+    fig_qual = px.bar(
+        qual_df,
+        x="Qualification",
+        y="Headcount",
         color_discrete_sequence=["#0EA5E9"],
     )
-    fig.update_layout(template="plotly_dark", height=300, showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    fig_qual.update_layout(
+        template="plotly_dark",
+        height=220,
+        showlegend=False
+    )
+    st.plotly_chart(fig_qual, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
-
-    colA, colB = st.columns(2)
-
-    with colA:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### Mobility Breakdown")
-        figA = px.pie(
-            names=["Transfers", "Temporary Assignments", "Exits"],
-            values=[35, 12, 4],
-            color_discrete_sequence=["#38BDF8", "#0EA5E9", "#EF4444"],
-        )
-        figA.update_layout(template="plotly_dark", height=320, legend_title_text="")
-        st.plotly_chart(figA, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with colB:
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### Workforce by Qualification")
-        figB = px.bar(
-            pd.DataFrame(
-                {"Qualification": ["CTA", "EAV", "SUP", "TRN"], "Headcount": [30, 18, 7, 5]}
-            ),
-            x="Qualification",
-            y="Headcount",
-            color_discrete_sequence=["#0EA5E9"],
-        )
-        figB.update_layout(template="plotly_dark", height=320, showlegend=False)
-        st.plotly_chart(figB, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
